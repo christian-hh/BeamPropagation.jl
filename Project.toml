@@ -1,0 +1,13 @@
+name = "BeamPropagation"
+uuid = "3b7771b3-0fff-45f6-8d8e-6a934b658944"
+authors = ["Christian Heiberg Hallas <christianhallas@g.harvard.edu> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
