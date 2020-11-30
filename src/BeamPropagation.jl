@@ -42,7 +42,7 @@ function update!(f, rs, vs, as, gs, dt, p)
 end
 
 """
-    propagate!(rs, vs, as, gs, f, is_dead, η, dt, max_steps, p)
+    propagate!(rs, vs, as, gs, f, is_dead, η, ξ, dt, max_steps, p)
 """
 function propagate!(rs, vs, as, gs, f, is_dead, η, ξ, dt, max_steps, p)
     n = length(rs)

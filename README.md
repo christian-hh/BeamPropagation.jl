@@ -28,22 +28,24 @@ propagate!(rs, vs, as, gs, f, dead, is_dead, η, dt, max_steps, p)
     p:          parameters to be passed to the propagation
 ```
 
-The use of the function is illustrated through the example below, where the trajectories of particles experiencing magneto-optical forces ("Zeeman-Sisyphus") are simulated. We first load the `Propagation` module and define constants specific to the example.
-```
-using Propagation
+The use of the function is illustrated through the example below, where the trajectories of particles experiencing magneto-optical forces ("Zeeman-Sisyphus") are simulated. For more details on this example, please refer to https://arxiv.org/pdf/1609.05823.pdf. 
 
-# Define physical constants
-const h = 6.63e-34
-const ħ = h / 2π
-const M = 190 * 1.66e-27
-const λ = 577 * 1e-9
-const μ = 9.27e-24
-const Γ = 2π * 8.3e6
-const g = -9.8
-const Iₛ = 5.0
-const w = 0.5
-const P = 250.0
-const P0 = 2P / (Iₛ * π * w^2)
+We first load the `BeamPropagation.jl` package and any other relevant packages.
+```
+using BeamPropagation
+using StaticArrays, DelimitedFiles, BenchmarkTools, Plots, StructArrays, StatsBase
+```
+We then define any constants specific to the example. Any physical values may be conveniently defined via the `@with_unit` macro. This macro utilizes the physical units and constants defined in the `Unitful.jl` package, and converts the defined values (with units) to the corresponding value (defined as a `Float64`) in SI units. While not strictly required for defining the physical variables to be used, this macro helps to ensure that all physical values are defined with compatible units.
+```
+const h = @with_unit 1 "h"
+const ħ = @with_unit 1 "ħ"
+const μ = @with_unit 1 "μB"
+const M = @with_unit 190 "u"
+const λ = @with_unit 577 "nm"
+const Γ = @with_unit 2π * 8.3e6 "MHz"
+const Iₛ = @with_unit 5.0 "mW/cm^2"
+const w = @with_unit 0.5 "cm"
+const P = @with_unit 250.0 "mW"
 ```
 
 Next, we define arrays of type `SVector` (via the package `StaticArrays`), one for each of positions (`rs`), velocities (`vs`), and accelerations (`as`). They are initialized to the desired initial values of the particles. `n` indicates the number of particles to be simulated.
@@ -65,7 +67,7 @@ vs = SVector.(vx, vy, vz)
 as = SVector.(zeros(n), zeros(n), zeros(n))
 ```
 
-Two additional arrays are also required to indicate the initial ground states of the particles (`gs`) and which particles are "dead" (`dead`). For this example, we assume that there are 12 ground states (and 4 excited states), and that the particles have uniform probability of starting in any one of them.
+Two additional arrays are required to indicate the initial ground states of the particles (`gs`) and which particles are "dead" (`dead`). For this example, we assume that there are 12 ground states (and 4 excited states), and that the particles have uniform probability of starting in any one of them.
 ```
 num_gs = 12
 num_es = 4
@@ -82,7 +84,7 @@ end
 ```
 (The `@inline` macro here ensures that the tuple `x, y, z` is not allocated when `is_dead` is called.)
 
-The magnetic field and its gradient are loaded to pre-allocated arrays from a pre-computed text file. These arrays may then be used to update the magnetic field at the location of particles throughout its propagation.
+The magnetic field and its gradient are loaded from to pre-allocated arrays from a pre-computed text file `Bfieldmap.txt`. These arrays may then be used to update the magnetic field at the location of particles throughout their propagation.
 ```
 Barr = readdlm("./Bfieldmap.txt")
 xlut   = Barr[:,1];         ylut   = Barr[:,2];         zlut   = Barr[:,3];

@@ -136,24 +136,24 @@ end
 rs_=deepcopy(rs); vs_=deepcopy(vs); as_=deepcopy(as); gs_=deepcopy(gs);
 rs_traj, vs_traj = propagate!(rs_, vs_, as_, gs_, f_nothing, is_dead, η, ξ, dt, max_steps, p);
 
-plot()
-anim = @animate for i in 1:100
-    r = rs_traj[i]
-    scatter!(
-        [r_[3] for r_ in r],
-        [r_[1] for r_ in r],
-        [r_[2] for r_ in r],
-        xlims=(0, 1.2),
-        ylims=(-0.005, 0.005),
-        zlims=(-0.005, 0.005),
-        alpha=0.30,
-        legend=false,
-        markersize=2
-        )
-end
-gif(anim, "some_file_name.gif", fps=10)
-
-rz_final = [r[end][3] for r in rs_traj]
-vz_final = [v[end][3] for v in vs_traj]
-idxs = rz_final .> 1.14
-histogram(vz_final[idxs])
+# plot()
+# anim = @animate for i in 1:100
+#     r = rs_traj[i]
+#     scatter!(
+#         [r_[3] for r_ in r],
+#         [r_[1] for r_ in r],
+#         [r_[2] for r_ in r],
+#         xlims=(0, 1.2),
+#         ylims=(-0.005, 0.005),
+#         zlims=(-0.005, 0.005),
+#         alpha=0.30,
+#         legend=false,
+#         markersize=2
+#         )
+# end
+# gif(anim, "some_file_name.gif", fps=10)
+#
+# rz_final = [r[end][3] for r in rs_traj]
+# vz_final = [v[end][3] for v in vs_traj]
+# idxs = rz_final .> 1.14
+# histogram(vz_final[idxs])
