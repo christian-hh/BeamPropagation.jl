@@ -1,7 +1,17 @@
 # BeamPropagation.jl
-
 This repository implements simulation of particle trajectories in Julia.
 
+# Installation
+The package can be installed by running
+```
+    ] add https://github.com/christian-hh/BeamPropagation.jl
+```
+in the REPL. The `]` command activates Julia's package manager. Alternatively, use
+```
+    using Pkg; Pkg.clone(https://github.com/christian-hh/BeamPropagation.jl)
+```
+
+# Usage
 The main function of the code is `propagate!`, whose signature is shown below.
 ```
 propagate!(rs, vs, as, gs, f, dead, is_dead, η, dt, max_steps, p)
