@@ -28,13 +28,14 @@ propagate!(rs, vs, as, gs, f, dead, is_dead, η, dt, max_steps, p)
     p:          parameters to be passed to the propagation
 ```
 
-The use of the function is illustrated through the example below, where the trajectories of particles experiencing magneto-optical forces ("Zeeman-Sisyphus") are simulated. For more details on this example, please refer to https://arxiv.org/pdf/1609.05823.pdf. 
+The use of the function is illustrated through an example, where the trajectories of particles experiencing magneto-optical forces ("Zeeman-Sisyphus") are simulated. For more details on this example, please refer to https://arxiv.org/pdf/1609.05823.pdf.
 
 We first load the `BeamPropagation.jl` package and any other relevant packages.
 ```
 using BeamPropagation
 using StaticArrays, DelimitedFiles, BenchmarkTools, Plots, StructArrays, StatsBase
 ```
+
 We then define any constants specific to the example. Any physical values may be conveniently defined via the `@with_unit` macro. This macro utilizes the physical units and constants defined in the `Unitful.jl` package, and converts the defined values (with units) to the corresponding value (defined as a `Float64`) in SI units. While not strictly required for defining the physical variables to be used, this macro helps to ensure that all physical values are defined with compatible units.
 ```
 const h = @with_unit 1 "h"
@@ -157,7 +158,7 @@ end
 ```
 (Note that functions are again defined inline to prevent allocation.)
 
-Any parameters to the simulation are to be passed as a `NamedTuple`. The macro `@param` may be used to easily define this variable. Individual parameters may then be called with the usual `NamedTuple` syntax, `p.<parameter name>`.
+Any parameters of the simulation are to be passed as a `NamedTuple`. The macro `@param` may be used to easily define this variable. Individual parameters may then be called with the usual `NamedTuple` syntax, `p.<parameter name>`.
 ```
 p = @params (dFlut, Bnormlut, δs)
 ```
