@@ -1,43 +1,23 @@
-using Distributed
-rmprocs(workers())
-addprocs(2)
-
-@everywhere using
-    Revise, BeamPropagation, Distributions, StatsBase, StaticArrays, PhysicalConstants.CODATA2018, Plots
+using Revise, BeamPropagation, Distributions, StatsBase, StaticArrays, PhysicalConstants.CODATA2018, Plots, BenchmarkTools
 
 const h = PlanckConstant.val
 const ħ = h / 2π
 const λ = @with_unit 626 "nm"
 const k = 2π / λ
 const m = @with_unit 57 "u"
+const Δv = ħ * k / m
 
-@everywhere n = Int(1e5)
-
-vz_μ = @with_unit 110 "m/s"
+vz_μ = @with_unit 125 "m/s"
 vz_σ = @with_unit 25 "m/s"
 vxy_μ = @with_unit 0 "m/s"
-vxy_σ = @with_unit 20 "m/s"
+vxy_σ = @with_unit 25 "m/s"
 exit_radius = @with_unit 4 "mm"
 
-r = (Normal(0, exit_radius/2), Normal(0, exit_radius/2), Normal(0, 0))
-v = (Normal(vxy_μ, vxy_σ), Normal(vxy_μ, vxy_σ), Normal(vz_μ, vz_σ))
-a = (Normal(0, 0), Normal(0, 0), Normal(0, 0))
+const r = (Normal(0, exit_radius/2), Normal(0, exit_radius/2), Normal(0, 0))
+const v = (Normal(vxy_μ, vxy_σ), Normal(vxy_μ, vxy_σ), Normal(vz_μ, vz_σ))
+const a = (Normal(0, 0), Normal(0, 0), Normal(0, 0))
 
-# vz = rand(Normal(vz_μ, vz_σ), n)
-# vx = rand(Normal(vxy_μ, vxy_σ), n)
-# vy = rand(Normal(vxy_μ, vxy_σ), n)
-#
-# rx = rand(Normal(0, exit_radius/2), n)
-# ry = rand(Normal(0, exit_radius/2), n)
-# rz = zeros(n)
-#
-# rs = MVector.(rx, ry, rz)
-# vs = MVector.(vx, vy, vz)
-# as = MVector.(zeros(n), zeros(n), zeros(n))
-#
-# states = ones(Int64, n)
-
-@everywhere VBRs = Weights([
+VBRs = Weights([
     0.9457,     # to 000
     0.0447,     # 100
     3.9e-3,     # 0200
@@ -53,7 +33,7 @@ a = (Normal(0, 0), Normal(0, 0), Normal(0, 0))
     4.3e-5      # other states
 ])
 
-@everywhere addressed = [
+addressed = [
     true,   # to 000
     true,   # 100
     true,   # 0200
@@ -65,11 +45,11 @@ a = (Normal(0, 0), Normal(0, 0), Normal(0, 0))
     true,   # 1220
     true,   # 110
     false,   # 110, N=2
-    false,  # 220
+    false,   # 220
     false   # other states
 ]
 
-@everywhere transverse = [
+transverse = [
     false,  # to 000
     false,  # 100
     false,  # 0200
@@ -85,6 +65,12 @@ a = (Normal(0, 0), Normal(0, 0), Normal(0, 0))
     false   # other states
 ]
 
+@inline function random_unit3Dvector()
+    θ = rand(Uniform(0, 2π))
+    z = rand(Uniform(-1, 1))
+    return @SVector [sqrt(1-z^2)*cos(θ), sqrt(1-z^2)*sin(θ), z]
+end
+
 @inline function transverse_on(z)
     if 0.175 < z < 0.20     # 1st transverse region 17.5 - 20 cm after cell
         return true
@@ -97,62 +83,71 @@ a = (Normal(0, 0), Normal(0, 0), Normal(0, 0))
     end
 end
 
-@everywhere @inline is_dead(r) = sqrt(r[1]^2 + r[2]^2) > 10e-3 || r[3] > 0.71
+const detect_rad  = @with_unit 0.5 "cm"
+const detect_zloc = @with_unit 70 "cm"
+const detect_zlen = @with_unit 0.5 "cm"
+const dead_rad = @with_unit 1 "cm"
+const dead_len = detect_zloc + detect_zlen
 
-@everywhere @inline function f(i, r, v, a, state, dt, p)
-    if addressed[state] & (~transverse[state] | transverse_on(r[3]))
+n = Int64(40e6)
+scattering_rate = @with_unit 1.2 "MHz"
+save_every      = 100
+delete_every    = 15
+dt              = 1 / scattering_rate
+max_steps       = Int64(3.5e4)
+
+@inline function simple_prop(r, v)
+    dist_detect = detect_zloc - r[3]
+    x_final = r[1] + v[1] * dist_detect / v[3]
+    y_final = r[2] + v[2] * dist_detect / v[3]
+    return sqrt(x_final^2 + y_final^2)
+end
+@inline discard(r, v) = (simple_prop(r, v) > dead_rad) || (r[3] > dead_len)
+@inline is_detectable(r) = v_perp(r) < detect_rad && (detect_zloc + detect_zlen > r[3] > detect_zloc)
+
+@inline function save(i, r, v, a, state, s)
+    s.vzs[i] = v[3]
+    s.detectable[i] = simple_prop(r, v) < detect_rad
+    return nothing
+end
+
+@inline function f(i, r, v, a, state, dt, p, s)
+    if is_detectable(r) && ~s.detectable[i]
+        s.detectable[i] = true
+    end
+    if p.addressed[state] & (~p.transverse[state] | transverse_on(r[3]))
         state′ = sample(1:13, p.VBRs)
-        v′ = v
-        v′[3] -= ħ * k / m
-        p.photons[i] += 1
-        p.vzs[i] = v′[3]
+        v′ = @SVector [v[1], v[2], v[3] - Δv]
+        v′ += Δv .* random_unit3Dvector()
+        s.photons[i] += 1
     else
         state′ = state
         v′ = v
-        p.vzs[i] = v′[3]
     end
+    s.vzs[i] = v′[3]
+    s.states[i] = state′
     return (state′, v′, a)
 end
 
-@everywhere photons = zeros(Int64, n)
-@everywhere vzs     = zeros(Float64, n)
-@everywhere p = @params (VBRs, addressed, photons, vzs)
+vzs           = zeros(Float64, n)
+photons       = zeros(Int64, n)
+detectable    = zeros(Bool, n)
+states        = ones(Int64, n)
 
-scattering_rate = @with_unit 1.0 "MHz"
-save_every      = 100
-delete_every    = 10
-dt              = 1 / scattering_rate
-max_steps       = Int(3.5e4)
+p = @params (VBRs, transverse, addressed)
+s = @params (vzs, photons, detectable, states)
 
-chunk_size = round(Int64, n / nworkers())
-@sync @distributed for _ in 1:nworkers()
-    rs, vs, as, states, dead, idxs = initialize_dists(chunk_size, r, v, a)
-    propagate_nosave(rs, vs, as, states, dead, idxs, f, is_dead, delete_every, dt, max_steps, p)
-end
-return nothing
+@time s₀, sₜ = propagate!(n, r, v, a, f, save, discard, delete_every, dt, max_steps, p, s)
 
-# @time propagate_parallel!(n, r, v, a, f, is_dead, delete_every, dt, max_steps, p)
-# @time propagate!(n, r, v, a, f, is_dead, delete_every, dt, max_steps, p)
+bright = [addressed[final_state] for final_state in sₜ.states]
 
-# @time @time propagate!(rs, vs, as, states, f, is_dead, delete_every, dt, max_steps, p)
+barhist(s₀.vzs[s₀.detectable], bins=0:25/4:225, alpha=0.5, xlim=[0,225])
+barhist!(sₜ.vzs[sₜ.detectable], bins=0:25/4:225, alpha=0.5)
+barhist!(sₜ.vzs[sₜ.detectable .& bright], bins=0:25/4:225, alpha=0.5)
 
-# v_start     = [v[1][3] for v in vs]
-# v_end       = p.vzs
-# alive       = [r[end][3] >= 0.71 for r in rs_]
-# # detectable  = [addressed[g[end]] & ~transverse[g[end]] for g in gs_]
-# detectable  = [addressed[g[end]] for g in gs_]
-#
-# histogram(v_start, alpha=0.5, bins=50, xlim=[0, 200], ylim=[0, 150], weights=alive)
-# histogram!(v_end[alive .& detectable], alpha=0.5, bins=50)
+sum(abs.(s₀.vzs[s₀.detectable]) .< 10) / n
+sum(abs.(sₜ.vzs[sₜ.detectable]) .< 10) / n
+sum(abs.(sₜ.vzs[sₜ.detectable .& bright]) .< 10) / n
 
-# @inline function transverse_on_TEST(z)
-#     # if 0.175 < z < 0.225     # 1st transverse region 17.5 - 22.5 cm after cell
-#         # return true
-#     if 0.275 < z < 0.325  # 2nd transverse region 27.5 - 32.5 cm after cell
-#         return true
-#     else
-#         return false
-#     end
-# end
-#
-# @inline is_dead_TEST(r) = sqrt(r[1]^2 + r[2]^2) > 10e-3 || r[3] > 0.50
+v_class = 0 .< sₜ.vzs .< 100
+histogram2d(s₀.vzs[sₜ.detectable .& bright .& v_class], sₜ.vzs[sₜ.detectable .& bright.& v_class], bins=20)
