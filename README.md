@@ -12,4 +12,4 @@ using Pkg; Pkg.clone(https://github.com/christian-hh/BeamPropagation.jl)
 ```
 
 ## Usage
-See `slowing.ipynb`.
+See `examples/slowing.ipynb`.
