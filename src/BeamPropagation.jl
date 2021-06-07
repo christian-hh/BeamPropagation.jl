@@ -165,13 +165,14 @@ function discard_particles!(particles, discard)
     return nothing
 end
 
-function propagate_particles!(r, v, a, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
+function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
 
     initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
     discard_particles!(particles, discard)
 
     step = 0
     while (step <= max_steps)
+
         if step % delete_every == 0
             discard_particles!(particles, discard)
         end
@@ -181,8 +182,11 @@ function propagate_particles!(r, v, a, particles, f::F1, save::F2, discard::F3, 
         end
 
         update(particles)
-        # dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
-        dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+        if alg == "euler"
+            dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
+        elseif alg == "rkf12"
+            dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+        end
 
         step += 1
     end
