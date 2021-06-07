@@ -1,6 +1,6 @@
 module BeamPropagation
 
-using StaticArrays, Unitful, LoopVectorization, StatsBase
+using StaticArrays, Unitful, LoopVectorization, StatsBase, StructArrays
 
 macro params(fields_tuple)
     fields = fields_tuple.args
@@ -17,30 +17,99 @@ macro with_unit(arg1, arg2)
 end
 export @with_unit
 
-function dtstep!(rs, vs, as, dt)
-    @avx for i in eachindex(rs, vs, as)
-        rs[i] += vs[i] * dt + as[i] * (0.5 * dt^2)
-        vs[i] += as[i] * dt
+function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
+
+    @inbounds for i in 1:size(particles, 1)
+        particles.a[i] = f(particles[i].r, particles[i].v, p)
+    end
+
+    @turbo for i in 1:size(particles, 1)
+        r = particles.r[i]
+        v = particles.v[i]
+        a = particles.a[i]
+        dt = particles.dt[i]
+
+        # Perform an Euler method step (first order)
+        particles.v[i] = v + a * dt
+        particles.r[i] = r + v * dt
     end
     return nothing
 end
 
-function update_dead!(rs, vs, dead, is_dead)
-    @inbounds for i in 1:size(rs,1)
-        dead[i] = is_dead(rs[i], vs[i])
+function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+
+    @inbounds for i in 1:size(particles, 1)
+        particles.a[i] = f(particles[i].r, particles[i].v, p)
     end
+
+    @turbo for i in 1:size(particles, 1)
+        r = particles.r[i]
+        v = particles.v[i]
+        a = particles.a[i]
+        dt = particles.dt[i]
+
+        # Perform an Euler method step (first order)
+        particles.v1[i] = v + a * dt
+        particles.r1[i] = r + v * dt
+    end
+
+    @inbounds for i in 1:size(particles, 1)
+        particles.a[i] = f(particles[i].r1, particles[i].v1, p)
+    end
+
+    @turbo for i in 1:size(particles, 1)
+        r = particles.r[i]
+        v = particles.v[i]
+        r1 = particles.r1[i]
+        v1 = particles.v1[i]
+        a = particles.a[i]
+        dt = particles.dt[i]
+
+        # Perform a Heun method step (second order)
+        v2 = 0.5v + 0.5 * (v1 + a * dt)
+        particles.v2[i] = v2
+        particles.r2[i] = 0.5r + 0.5 * (r1 + v2 * dt)
+    end
+
+    @inbounds for i in 1:size(particles, 1)
+        r1 = particles.r1[i]
+        r2 = particles.r2[i]
+        v2 = particles.v2[i]
+        dt = particles.dt[i]
+        error = sqrt(sum((r2 - r1)).^2)
+        particles.error[i] = error
+
+        if !iszero(error)
+            dt_corr = dt * 0.9 * (abstol / error)
+        else
+            dt_corr = dt
+        end
+        new_dt = min(max(dt_corr, dt_min), dt_max)
+        particles.dt[i] = new_dt
+
+        if error < abstol
+            particles.r[i] = r2
+            particles.v[i] = v2
+        end
+    end
+
     return nothing
 end
 
-function update!(f, idxs, rs, vs, as, states, dt, p, s)
-    @inbounds for i in 1:size(rs,1)
-        s′, v′, a′ = f(idxs[i], rs[i], vs[i], as[i], states[i], dt, p, s)
-        states[i] = s′
-        vs[i] = v′
-        as[i] = a′
-    end
-    return nothing
+mutable struct Particle
+    r::SVector{3, Float64}
+    v::SVector{3, Float64}
+    a::SVector{3, Float64}
+    dt::Float64
+    error::Float64
+    idx::Int64
+    r1::SVector{3, Float64}
+    v1::SVector{3, Float64}
+    r2::SVector{3, Float64}
+    v2::SVector{3, Float64}
+    dead::Bool
 end
+export Particle
 
 function save!(save, idxs, rs, vs, as, states, s)
     @inbounds for i in 1:size(rs,1)
@@ -49,32 +118,19 @@ function save!(save, idxs, rs, vs, as, states, s)
     return nothing
 end
 
-function setup(idxs, r, v, a, states, p)
-    dead_copy   = zeros(Bool, length(idxs))
-    rs_copy     = deepcopy(rs[idxs])
-    vs_copy     = deepcopy(vs[idxs])
-    as_copy     = deepcopy(as[idxs])
-    states_copy = deepcopy(states[idxs])
-    p_copy      = deepcopy(p)
-    return rs_copy, vs_copy, as_copy, states_copy, dead_copy, p_copy, idxs
+function initialize_dists_particles!(r, v, a, particles, dt)
+    @inbounds for i in 1:size(particles, 1)
+        particles.r[i] = particles.r1[i] = SVector.(rand(r[1]), rand(r[2]), rand(r[3]))
+        particles.v[i] = particles.v1[i] = SVector.(rand(v[1]), rand(v[2]), rand(v[3]))
+        particles.a[i] = SVector.(rand(a[1]), rand(a[2]), rand(a[3]))
+        particles.dead[i] = false
+        particles.idx[i] = i
+        particles.dt[i] = dt
+        particles.error[i] = 0.0
+    end
+    return nothing
 end
-
-function initialize_dists(n, r, v, a)
-    rx = rand(r[1], n); ry = rand(r[2], n); rz = rand(r[3], n)
-    vx = rand(v[1], n); vy = rand(v[2], n); vz = rand(v[3], n)
-    ax = rand(a[1], n); ay = rand(a[2], n); az = rand(a[3], n)
-
-    rs = SVector.(rx, ry, rz)
-    vs = SVector.(vx, vy, vz)
-    as = SVector.(ax, ay, az)
-
-    states = ones(Int64, n)
-    dead = zeros(Bool, n)
-    idxs = collect(1:n)
-
-    return rs, vs, as, states, dead, idxs
-end
-export initialize_dists
+export initialize_dists_particles!
 
 function copy_save_data(s, actual_chunk_size)
     s_copy = NamedTuple()
@@ -92,121 +148,38 @@ function write_data(s, s_copy, chunk_idxs)
     return nothing
 end
 
-function delete_data(rs, vs, as, states, idxs, dead)
-    deleteat!(rs, dead)
-    deleteat!(vs, dead)
-    deleteat!(as, dead)
-    deleteat!(states, dead)
-    deleteat!(idxs, dead)
-    deleteat!(dead, dead)
+function discard_particles!(particles, discard)
+    @inbounds for i in 1:size(particles, 1)
+        particles.dead[i] = discard(particles.r[i], particles.v[i])
+    end
+    StructArrays.foreachfield(x -> deleteat!(x, particles.dead), particles)
     return nothing
 end
 
-function propagate!(n, r, v, a, f, save, discard, delete_every, dt, max_steps, p, s)
+function propagate_particles!(r, v, a, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, dt_min, dt_max, abstol) where {F1, F2, F3}
 
-    s_initial = deepcopy(s)
-    s_final = deepcopy(s)
+    initialize_dists_particles!(r, v, a, particles, dt)
+    discard_particles!(particles, discard)
 
-    chunk_size = round(Int64, n / Threads.nthreads())
-    Threads.@threads for i in 1:Threads.nthreads()
-
-        start_idx   = (i-1)*chunk_size+1
-        end_idx     = min(i*chunk_size, n)
-        chunk_idxs  = start_idx:end_idx
-        actual_chunk_size = length(chunk_idxs)
-
-        rs, vs, as, states, dead, idxs = initialize_dists(actual_chunk_size, r, v, a)
-
-        s_initial_copy = copy_save_data(s_initial, actual_chunk_size)
-        save!(save, idxs, rs, vs, as, states, s_initial_copy)
-        write_data(s_initial, s_initial_copy, chunk_idxs)
-
-        # Do one round of discards before propagation starts
-        update_dead!(rs, vs, dead, discard)
-        delete_data(rs, vs, as, states, idxs, dead)
-
-        # Copy parameters and data arrays to be saved to avoid thread race conditions
-        s_copy = copy_save_data(s_final, actual_chunk_size)
-        p_copy = deepcopy(p)
-
-        propagate_nosave(rs, vs, as, states, dead, idxs, f, discard, delete_every, dt, max_steps, p_copy, s_copy)
-
-        write_data(s_final, s_copy, chunk_idxs)
-    end
-
-    return s_initial, s_final
-end
-export propagate!
-
-function propagate_nosave(rs, vs, as, states, dead, idxs, f, discard, delete_every, dt, max_steps, p, s)
     step = 0
     while (step <= max_steps)
         if step % delete_every == 0
-            update_dead!(rs, vs, dead, discard)
-            delete_data(rs, vs, as, states, idxs, dead)
+            discard_particles!(particles, discard)
         end
-        update!(f, idxs, rs, vs, as, states, dt, p, s)
-        dtstep!(rs, vs, as, dt)
+
+        if step % save_every == 0
+            save(particles, p, s)
+        end
+
+        update(particles)
+        # dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
+        dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+
         step += 1
     end
+
     return nothing
 end
-export propagate_nosave
-
-# function propagate_insteps(rs, vs, as, states, dead, idxs, f, is_dead, discarded, delete_every, dt, max_steps, p)
-#
-#     for
-
-"""
-    propagate!(rs, vs, as, gs, f, is_dead, η, ξ, dt, max_steps, p)
-"""
-function propagate(rs, vs, as, states, f, is_dead, save_every, delete_every, dt, max_steps, p)
-
-    step = 0
-    while (step <= max_steps)
-
-        if step % delete_every == 0
-
-            update_dead!(rs, dead, is_dead)
-
-            # Positions and velocities for "dead" particles are saved
-            if save_every != -1
-                dead_rs = view(rs, dead)
-                dead_vs = view(vs, dead)
-                dead_gs = view(gs, dead)
-                dead_idxs = idxs[dead]
-                for i in eachindex(dead_rs, dead_vs, dead_idxs)
-                    push!(rs_[dead_idxs[i]], copy(dead_rs[i]))
-                    push!(vs_[dead_idxs[i]], copy(dead_vs[i]))
-                    push!(gs_[dead_idxs[i]], copy(dead_gs[i]))
-                end
-            end
-
-            deleteat!(rs, dead)
-            deleteat!(vs, dead)
-            deleteat!(as, dead)
-            deleteat!(gs, dead)
-            deleteat!(idxs, dead)
-            deleteat!(dead, dead)
-        end
-
-        # Save positions and velocities
-        if (step % save_every == 0) | (step == max_steps)
-            for i in eachindex(rs, idxs)
-                push!(rs_[idxs[i]], copy(rs[i]))
-                push!(vs_[idxs[i]], copy(vs[i]))
-                push!(gs_[idxs[i]], copy(gs[i]))
-            end
-        end
-
-        update!(f, idxs, rs, vs, as, gs, dt, p)
-        dtstep!(rs, vs, as, dt)
-
-        step += 1
-
-    end
-    return rs_, vs_, gs_
-end
-export propagate!
+export propagate_particles!
 
 end
