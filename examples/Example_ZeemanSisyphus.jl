@@ -3,21 +3,19 @@ using
     BeamPropagation, StaticArrays, DelimitedFiles, BenchmarkTools, Plots, StructArrays, StatsBase
 
 # Define constants
-const h = 6.63e-34
-const ħ = h / 2π
-const M = 190 * 1.66e-27
-const λ = 577 * 1e-9
-const μ = 9.27e-24
-const Γ = 2π * 8.3e6
-const g = -9.8
-const Iₛ = 5.0
-const w = 0.5
-const P = 250.0
-const P0 = 2P / (Iₛ * π * w^2)
+const h = @with_unit 1 "h"
+const ħ = @with_unit 1 "ħ"
+const μ = @with_unit 1 "μB"
+const M = @with_unit 190 "u"
+const λ = @with_unit 577 "nm"
+const Γ = @with_unit 2π * 8.3e6 "MHz"
+const Iₛ = @with_unit 5.0 "mW/cm^2"
+const w = @with_unit 0.5 "cm"
+const P = @with_unit 250.0 "mW"
 
 # Define parameters
+n           = 1000000
 dt          = 5e-7
-n           = 100000
 max_steps   = 1e5
 
 # Generate initial positions and velocities
@@ -46,7 +44,6 @@ dFlut = Array{SVector{3, Float64}}(undef, 51, 51, 201)
 Bnormlut = zeros(Float64, (51, 51, 201))
 for (i, (x, y, z)) in enumerate(zip(xlut, ylut, zlut))
 
-    #
     ix = round(Int, 1e4 * x + 25) + 1
     iy = round(Int, 1e4 * y + 25) + 1
     iz = mod(round(Int, z / 20e-5), 201) + 1
@@ -95,8 +92,8 @@ p = @params (dFlut, Bnormlut, δs)
 @inline detuning(Δ0, UB, vz) = 2π * (Δ0 + UB / h + vz / λ)
 @inline Prob(g, s, δ, dt) = Rsc(s, δ) * dt * g_to_e_TotalProb[g]
 
-@inline function scatterphoton(g, s, δ, dt, rnd)::Tuple{Bool, Int64}
-    if rnd > Prob(g, s, δ, dt)
+@inline function scatterphoton(g, s, δ, dt)::Tuple{Bool, Int64}
+    if rand() > Prob(g, s, δ, dt)
         return false, g
     else
         g′ = sample(end_gs, wvs[g])
@@ -113,20 +110,50 @@ end
     iy = round(Int, 1e4 * y + 25) + 1
     iz = mod(round(Int, z / 20e-5), 201) + 1
 
-    s = P0 * exp(-(x^2 + y^2) / (2(w/100)^2))
+    P0 = 2P / (Iₛ * π * w^2)
+    s = P0 * exp(-(x^2 + y^2) / (2w^2))
     UB = μ * μ_signs[g] * p.Bnormlut[ix, iy, iz]
     d1 = detuning(p.δs[1], UB, v[3])
-    scat1, g′  = scatterphoton(g, s, d1, dt, rand())
+    scat1, g′  = scatterphoton(g, s, d1, dt)
     d2 = detuning(p.δs[2], UB, v[3])
-    scat2, g′′ = scatterphoton(g′, s, d2, dt, rand())
+    scat2, g′′ = scatterphoton(g′, s, d2, dt)
     a′ = μ_signs[g] * p.dFlut[ix, iy, iz]
 
     return (a′, g′′)
 end
 
-η = 35; @btime propagate!(rs_, vs_, as_, gs_, $f, $is_dead, $η, $dt, $max_steps, $p) setup=(rs_=deepcopy($rs); vs_=deepcopy($vs); as_=deepcopy($as); gs_=deepcopy($gs)) evals=1;
+η = 35; ξ = 100;
 
-# η = 35; rs_=deepcopy(rs); vs_=deepcopy(vs); as_=deepcopy(as); gs_=deepcopy(gs)); rz_final, vz_final, az_final = propagate!(rs_, vs_, as_, gs_, dead_, dt, max_steps, η, is_dead, f, p);
+@btime propagate!(rs_, vs_, as_, gs_, $f, $is_dead, $η, $ξ, $dt, $max_steps, $p) setup=(rs_=deepcopy($rs); vs_=deepcopy($vs); as_=deepcopy($as); gs_=deepcopy($gs)) evals=1;
 
-survived = rz_final .> (0.95 * 1.2)
-histogram(vz_final[survived], bins=0:5:75)
+rs_=deepcopy(rs); vs_=deepcopy(vs); as_=deepcopy(as); gs_=deepcopy(gs);
+rs_traj, vs_traj = propagate!(rs_, vs_, as_, gs_, f, is_dead, η, ξ, dt, max_steps, p);
+
+@inline function f_nothing(r, v, a, g, dt, p)
+    return (a, g)
+end
+
+rs_=deepcopy(rs); vs_=deepcopy(vs); as_=deepcopy(as); gs_=deepcopy(gs);
+rs_traj, vs_traj = propagate!(rs_, vs_, as_, gs_, f_nothing, is_dead, η, ξ, dt, max_steps, p);
+
+# plot()
+# anim = @animate for i in 1:100
+#     r = rs_traj[i]
+#     scatter!(
+#         [r_[3] for r_ in r],
+#         [r_[1] for r_ in r],
+#         [r_[2] for r_ in r],
+#         xlims=(0, 1.2),
+#         ylims=(-0.005, 0.005),
+#         zlims=(-0.005, 0.005),
+#         alpha=0.30,
+#         legend=false,
+#         markersize=2
+#         )
+# end
+# gif(anim, "some_file_name.gif", fps=10)
+#
+# rz_final = [r[end][3] for r in rs_traj]
+# vz_final = [v[end][3] for v in vs_traj]
+# idxs = rz_final .> 1.14
+# histogram(vz_final[idxs])
