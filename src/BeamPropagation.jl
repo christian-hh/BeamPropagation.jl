@@ -76,21 +76,28 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
         r2 = particles.r2[i]
         v2 = particles.v2[i]
         dt = particles.dt[i]
-        error = sqrt(sum((r2 - r1)).^2)
-        particles.error[i] = error
 
-        if !iszero(error)
-            dt_corr = dt * 0.9 * (abstol / error)
+        if particles.use_adaptive[i]
+            error = sqrt(sum((r2 - r1)).^2)
+            particles.error[i] = error
+
+            if !iszero(error)
+                dt_corr = dt * 0.9 * (abstol / error)
+            else
+                dt_corr = dt
+            end
+            new_dt = min(max(dt_corr, dt_min), dt_max)
+            particles.dt[i] = new_dt
+
+            if error < abstol
+                particles.r[i] = r2
+                particles.v[i] = v2
+            end
         else
-            dt_corr = dt
-        end
-        new_dt = min(max(dt_corr, dt_min), dt_max)
-        particles.dt[i] = new_dt
-
-        if error < abstol
             particles.r[i] = r2
             particles.v[i] = v2
         end
+
     end
 
     return nothing
@@ -101,6 +108,7 @@ mutable struct Particle
     v::SVector{3, Float64}
     a::SVector{3, Float64}
     dt::Float64
+    use_adaptive::Bool
     error::Float64
     idx::Int64
     r1::SVector{3, Float64}
@@ -118,7 +126,7 @@ function save!(save, idxs, rs, vs, as, states, s)
     return nothing
 end
 
-function initialize_dists_particles!(r, v, a, particles, dt)
+function initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
     @inbounds for i in 1:size(particles, 1)
         particles.r[i] = particles.r1[i] = SVector.(rand(r[1]), rand(r[2]), rand(r[3]))
         particles.v[i] = particles.v1[i] = SVector.(rand(v[1]), rand(v[2]), rand(v[3]))
@@ -126,6 +134,7 @@ function initialize_dists_particles!(r, v, a, particles, dt)
         particles.dead[i] = false
         particles.idx[i] = i
         particles.dt[i] = dt
+        particles.use_adaptive[i] = use_adaptive
         particles.error[i] = 0.0
     end
     return nothing
@@ -156,9 +165,9 @@ function discard_particles!(particles, discard)
     return nothing
 end
 
-function propagate_particles!(r, v, a, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, dt_min, dt_max, abstol) where {F1, F2, F3}
+function propagate_particles!(r, v, a, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
 
-    initialize_dists_particles!(r, v, a, particles, dt)
+    initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
     discard_particles!(particles, discard)
 
     step = 0
