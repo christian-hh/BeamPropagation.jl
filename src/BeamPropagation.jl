@@ -82,7 +82,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
             particles.error[i] = error
 
             if !iszero(error)
-                dt_corr = dt * 0.9 * (abstol / error)
+                dt_corr = dt * 0.9 * sqrt(abstol / (2 * error))
             else
                 dt_corr = dt
             end
