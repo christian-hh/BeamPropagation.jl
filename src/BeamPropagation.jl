@@ -20,7 +20,7 @@ export @with_unit
 function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
 
     @inbounds for i in 1:size(particles, 1)
-        particles.a[i] = f(particles[i].r, particles[i].v, p)
+        particles.a[i] = f(particles.idx[i], particles[i].r, particles[i].v, p)
     end
 
     @turbo for i in 1:size(particles, 1)
@@ -39,7 +39,7 @@ end
 function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
 
     @inbounds for i in 1:size(particles, 1)
-        particles.a[i] = f(particles[i].r, particles[i].v, p)
+        particles.a[i] = f(particles.idx[i], particles.r[i], particles.v[i], p)
     end
 
     @turbo for i in 1:size(particles, 1)
@@ -54,7 +54,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
     end
 
     @inbounds for i in 1:size(particles, 1)
-        particles.a[i] = f(particles[i].r1, particles[i].v1, p)
+        particles.a[i] = f(particles.idx[i], particles.r1[i], particles[i].v1, p)
     end
 
     @turbo for i in 1:size(particles, 1)
@@ -84,7 +84,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
             if !iszero(error)
                 dt_corr = dt * 0.9 * sqrt(abstol / (2 * error))
             else
-                dt_corr = dt
+                dt_corr = dt_max
             end
             new_dt = min(max(dt_corr, dt_min), dt_max)
             particles.dt[i] = new_dt
@@ -168,20 +168,20 @@ end
 function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
 
     initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
-    discard_particles!(particles, discard)
 
     step = 0
     while (step <= max_steps)
 
-        if step % delete_every == 0
-            discard_particles!(particles, discard)
-        end
+        update(particles, p, s, dt)
 
         if step % save_every == 0
             save(particles, p, s)
         end
 
-        update(particles)
+        if step % delete_every == 0
+            discard_particles!(particles, discard)
+        end
+
         if alg == "euler"
             dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
         elseif alg == "rkf12"
