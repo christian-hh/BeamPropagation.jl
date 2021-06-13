@@ -1,6 +1,11 @@
 module BeamPropagation
 
-using StaticArrays, Unitful, LoopVectorization, StatsBase, StructArrays
+using
+    StaticArrays,
+    Unitful,
+    LoopVectorization,
+    StatsBase,
+    StructArrays
 
 macro params(fields_tuple)
     fields = fields_tuple.args
@@ -126,13 +131,13 @@ function save!(save, idxs, rs, vs, as, states, s)
     return nothing
 end
 
-function initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
+function initialize_dists_particles!(r, v, a, i_start, particles, dt, use_adaptive)
     @inbounds for i in 1:size(particles, 1)
         particles.r[i] = particles.r1[i] = SVector.(rand(r[1]), rand(r[2]), rand(r[3]))
         particles.v[i] = particles.v1[i] = SVector.(rand(v[1]), rand(v[2]), rand(v[3]))
         particles.a[i] = SVector.(rand(a[1]), rand(a[2]), rand(a[3]))
         particles.dead[i] = false
-        particles.idx[i] = i
+        particles.idx[i] = i_start + i - 1
         particles.dt[i] = dt
         particles.use_adaptive[i] = use_adaptive
         particles.error[i] = 0.0
@@ -140,22 +145,6 @@ function initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
     return nothing
 end
 export initialize_dists_particles!
-
-function copy_save_data(s, actual_chunk_size)
-    s_copy = NamedTuple()
-    for key in keys(s)
-        array_to_save = deepcopy(s[key][1:actual_chunk_size])
-        s_copy = (; s_copy..., key => array_to_save)
-    end
-    return s_copy
-end
-
-function write_data(s, s_copy, chunk_idxs)
-    for key in keys(s)
-        s[key][chunk_idxs] .= s_copy[key]
-    end
-    return nothing
-end
 
 function discard_particles!(particles, discard)
     @inbounds for i in 1:size(particles, 1)
@@ -165,30 +154,74 @@ function discard_particles!(particles, discard)
     return nothing
 end
 
+# function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
+#
+#     initialize_dists_particles!(r, v, a, 1, particles, dt, use_adaptive)
+#
+#     step = 0
+#     while (step <= max_steps)
+#
+#         update(particles, p, s, dt)
+#
+#         if step % save_every == 0
+#             save(particles, p, s)
+#         end
+#
+#         if step % delete_every == 0
+#             discard_particles!(particles, discard)
+#         end
+#
+#         if alg == "euler"
+#             dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
+#         elseif alg == "rkf12"
+#             dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+#         end
+#
+#         step += 1
+#     end
+#
+#     return nothing
+# end
+# export propagate_particles!
+
 function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
 
-    initialize_dists_particles!(r, v, a, particles, dt, use_adaptive)
+    n = length(particles)
+    n_threads = Threads.nthreads()
+    chunk_size = ceil(Int64, n / n_threads)
 
-    step = 0
-    while (step <= max_steps)
+    Threads.@threads for i in 1:n_threads
 
-        update(particles, p, s, dt)
+        start_idx   = (i-1)*chunk_size+1
+        end_idx     = min(i*chunk_size, n)
+        chunk_idxs  = start_idx:end_idx
+        actual_chunk_size = length(chunk_idxs)
 
-        if step % save_every == 0
-            save(particles, p, s)
+        particles_chunk = particles[chunk_idxs]
+        initialize_dists_particles!(r, v, a, start_idx, particles_chunk, dt, use_adaptive)
+
+        for step in 0:(max_steps - 1)
+
+            update(particles_chunk, p, s, dt)
+
+            if step % save_every == 0
+                save(particles_chunk, p, s)
+            end
+
+            if step % delete_every == 0
+                discard_particles!(particles_chunk, discard)
+            end
+
+            if alg == "euler"
+                dtstep_euler!(particles_chunk, f, abstol, p, dt_min, dt_max)
+            elseif alg == "rkf12"
+                dtstep_eulerrich!(particles_chunk, f, abstol, p, dt_min, dt_max)
+            end
+
+            if iszero(length(particles_chunk))
+                break
+            end
         end
-
-        if step % delete_every == 0
-            discard_particles!(particles, discard)
-        end
-
-        if alg == "euler"
-            dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
-        elseif alg == "rkf12"
-            dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
-        end
-
-        step += 1
     end
 
     return nothing

@@ -6,6 +6,8 @@ version = "0.1.0"
 [deps]
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
 ParallelDataTransfer = "2dcacdae-9679-587a-88bb-8b444fb7085b"
+PhysicalConstants = "5ad8b20f-a522-5ce9-bfc9-ddf1d5bda6ab"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
