@@ -6,9 +6,7 @@ The package can be installed by running
 ```
 ] add https://github.com/christian-hh/BeamPropagation.jl
 ```
-in the REPL. The `]` command activates Julia's package manager. Alternatively, use
-```
-using Pkg; Pkg.clone(https://github.com/christian-hh/BeamPropagation.jl)
+in the REPL.
 ```
 
 ## Usage
