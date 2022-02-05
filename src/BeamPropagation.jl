@@ -28,7 +28,7 @@ function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
         particles.a[i] = f(particles.idx[i], particles[i].r, particles[i].v, p)
     end
 
-    @turbo for i in 1:size(particles, 1)
+    for i in 1:size(particles, 1)
         r = particles.r[i]
         v = particles.v[i]
         a = particles.a[i]
@@ -47,7 +47,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
         particles.a[i] = f(particles.idx[i], particles.r[i], particles.v[i], p)
     end
 
-    @turbo for i in 1:size(particles, 1)
+    for i in 1:size(particles, 1)
         r = particles.r[i]
         v = particles.v[i]
         a = particles.a[i]
@@ -62,7 +62,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
         particles.a[i] = f(particles.idx[i], particles.r1[i], particles[i].v1, p)
     end
 
-    @turbo for i in 1:size(particles, 1)
+    for i in 1:size(particles, 1)
         r = particles.r[i]
         v = particles.v[i]
         r1 = particles.r1[i]
@@ -107,6 +107,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
 
     return nothing
 end
+export dtstep_eulerrich!
 
 mutable struct Particle
     r::SVector{3, Float64}
@@ -154,37 +155,37 @@ function discard_particles!(particles, discard)
     return nothing
 end
 
-# function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
-#
-#     initialize_dists_particles!(r, v, a, 1, particles, dt, use_adaptive)
-#
-#     step = 0
-#     while (step <= max_steps)
-#
-#         update(particles, p, s, dt)
-#
-#         if step % save_every == 0
-#             save(particles, p, s)
-#         end
-#
-#         if step % delete_every == 0
-#             discard_particles!(particles, discard)
-#         end
-#
-#         if alg == "euler"
-#             dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
-#         elseif alg == "rkf12"
-#             dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
-#         end
-#
-#         step += 1
-#     end
-#
-#     return nothing
-# end
-# export propagate_particles!
+function propagate_particles_single!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
 
-function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
+    initialize_dists_particles!(r, v, a, 1, particles, dt, use_adaptive)
+
+    step = 0
+    while (step <= max_steps)
+
+        update(particles, p, s, dt)
+
+        if step % save_every == 0
+            save(particles, p, s)
+        end
+
+        if step % delete_every == 0
+            discard_particles!(particles, discard)
+        end
+
+        if alg == "euler"
+            dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
+        elseif alg == "rkf12"
+            dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+        end
+
+        step += 1
+    end
+
+    return nothing
+end
+export propagate_particles_single!
+
+function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol, randomize) where {F1, F2, F3}
 
     n = length(particles)
     n_threads = Threads.nthreads()
@@ -198,7 +199,9 @@ function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard:
         actual_chunk_size = length(chunk_idxs)
 
         particles_chunk = particles[chunk_idxs]
-        initialize_dists_particles!(r, v, a, start_idx, particles_chunk, dt, use_adaptive)
+        if randomize
+            initialize_dists_particles!(r, v, a, start_idx, particles_chunk, dt, use_adaptive)
+        end
 
         for step in 0:(max_steps - 1)
 
