@@ -5,22 +5,17 @@ using
     Unitful,
     LoopVectorization,
     StatsBase,
-    StructArrays
+    StructArrays,
+    MutableNamedTuples
 
 macro params(fields_tuple)
     fields = fields_tuple.args
     esc(
         quote
-            NamedTuple{Tuple($fields)}(($fields_tuple))
+            MutableNamedTuples.MutableNamedTuple{Tuple($fields)}(($fields_tuple))
         end)
 end
 export @params
-
-macro with_unit(arg1, arg2)
-    arg2 = @eval @u_str $arg2
-    return convert(Float64, upreferred(eval(arg1) .* arg2).val)
-end
-export @with_unit
 
 function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
 
@@ -155,11 +150,16 @@ function discard_particles!(particles, discard)
     return nothing
 end
 
-function propagate_particles_single!(r, v, a, alg, particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
+function propagate_particles_single!(
+        r, v, a, alg, 
+        particles, f::F1, save::F2, discard::F3, save_every, delete_every, max_steps, 
+        update, p, s, dt, use_adaptive, dt_min, dt_max, abstol) where {F1, F2, F3}
 
     initialize_dists_particles!(r, v, a, 1, particles, dt, use_adaptive)
-
+    print(particles[1].r)
+    
     step = 0
+    
     while (step <= max_steps)
 
         update(particles, p, s, dt)
@@ -190,14 +190,16 @@ function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard:
     n = length(particles)
     n_threads = Threads.nthreads()
     chunk_size = ceil(Int64, n / n_threads)
-
+    
     Threads.@threads for i in 1:n_threads
 
+        p_ = deepcopy(p)
+        
         start_idx   = (i-1)*chunk_size+1
         end_idx     = min(i*chunk_size, n)
         chunk_idxs  = start_idx:end_idx
         actual_chunk_size = length(chunk_idxs)
-
+        
         particles_chunk = particles[chunk_idxs]
         if randomize
             initialize_dists_particles!(r, v, a, start_idx, particles_chunk, dt, use_adaptive)
@@ -205,10 +207,10 @@ function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard:
 
         for step in 0:(max_steps - 1)
 
-            update(particles_chunk, p, s, dt)
+            update(particles_chunk, p_, s, dt)
 
             if step % save_every == 0
-                save(particles_chunk, p, s)
+                save(particles_chunk, p_, s)
             end
 
             if step % delete_every == 0
@@ -216,9 +218,9 @@ function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard:
             end
 
             if alg == "euler"
-                dtstep_euler!(particles_chunk, f, abstol, p, dt_min, dt_max)
+                dtstep_euler!(particles_chunk, f, abstol, p_, dt_min, dt_max)
             elseif alg == "rkf12"
-                dtstep_eulerrich!(particles_chunk, f, abstol, p, dt_min, dt_max)
+                dtstep_eulerrich!(particles_chunk, f, abstol, p_, dt_min, dt_max)
             end
 
             if iszero(length(particles_chunk))
