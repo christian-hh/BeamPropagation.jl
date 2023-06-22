@@ -1,5 +1,7 @@
 module BeamPropagation
 
+include("AsymmetricGaussianTrap.jl")
+
 using
     StaticArrays,
     Unitful,
@@ -17,10 +19,10 @@ macro params(fields_tuple)
 end
 export @params
 
-function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
+function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max, time)
 
     @inbounds for i in 1:size(particles, 1)
-        particles.a[i] = f(particles.idx[i], particles[i].r, particles[i].v, p)
+        particles.a[i] = f(particles.idx[i], particles[i].r, particles[i].v, p, time)
     end
 
     for i in 1:size(particles, 1)
@@ -36,10 +38,10 @@ function dtstep_euler!(particles, f, abstol, p, dt_min, dt_max)
     return nothing
 end
 
-function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
+function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max, time)
 
     @inbounds for i in 1:size(particles, 1)
-        particles.a[i] = f(particles.idx[i], particles.r[i], particles.v[i], p)
+        particles.a[i] = f(particles.idx[i], particles.r[i], particles.v[i], p, time)
     end
 
     for i in 1:size(particles, 1)
@@ -54,7 +56,7 @@ function dtstep_eulerrich!(particles, f, abstol, p, dt_min, dt_max)
     end
 
     @inbounds for i in 1:size(particles, 1)
-        particles.a[i] = f(particles.idx[i], particles.r1[i], particles[i].v1, p)
+        particles.a[i] = f(particles.idx[i], particles.r1[i], particles[i].v1, p, time)
     end
 
     for i in 1:size(particles, 1)
@@ -205,9 +207,13 @@ function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard:
             initialize_dists_particles!(r, v, a, start_idx, particles_chunk, dt, use_adaptive)
         end
 
+        idx = 1
+        save_idx = 1
+        time = 0.0
+
         for step in 0:(max_steps - 1)
 
-            update(particles_chunk, p_, s, dt)
+            update(particles_chunk, p_, s, dt, time, idx)
 
             if step % save_every == 0
                 save(particles_chunk, p_, s)
@@ -218,10 +224,13 @@ function propagate_particles!(r, v, a, alg, particles, f::F1, save::F2, discard:
             end
 
             if alg == "euler"
-                dtstep_euler!(particles_chunk, f, abstol, p_, dt_min, dt_max)
+                dtstep_euler!(particles_chunk, f, abstol, p_, dt_min, dt_max, time)
             elseif alg == "rkf12"
-                dtstep_eulerrich!(particles_chunk, f, abstol, p_, dt_min, dt_max)
+                dtstep_eulerrich!(particles_chunk, f, abstol, p_, dt_min, dt_max, time)
             end
+
+            idx += 1
+            time += dt
 
             if iszero(length(particles_chunk))
                 break
